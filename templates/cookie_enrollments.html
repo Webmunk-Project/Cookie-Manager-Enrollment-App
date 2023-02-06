@@ -1,0 +1,187 @@
+{% load static %}
+{% load tz %}
+{% load webmunk_enrollments %}
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1">
+		<meta name="description" content="">
+		<title>Enrollments | Webmunk</title>
+		<!-- Bootstrap core CSS -->
+		<link href="{% static 'enrollment/vendor/css/bootstrap.css' %}" rel="stylesheet">
+		<link href="{% static 'enrollment/vendor/css/bootstrap-table.css' %}" rel="stylesheet">
+
+		<!-- Favicons -->
+		<meta name="theme-color" content="#7952b3">
+		<style>
+			.bd-placeholder-img {
+				font-size: 1.125rem;
+				text-anchor: middle;
+				-webkit-user-select: none;
+				-moz-user-select: none;
+				user-select: none;
+			}
+
+			@media (min-width: 768px) {
+				.bd-placeholder-img-lg {
+					font-size: 3.5rem;
+				}
+			}
+
+			/* Show it's not fixed to the top */
+			body {
+				min-height: 75rem;
+			}
+			
+			.navbar a {
+				color: white;
+				text-decoration: none;
+			}
+
+			.navbar a:hover {
+				text-decoration: underline;
+			}
+		</style>
+	</head>
+	<body>
+		<nav class="navbar navbar-expand-md navbar-dark bg-dark mb-4">
+			<div class="container-fluid">
+				<a class="navbar-brand" href="#">Enrollments</a>
+				<button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarCollapse" aria-controls="navbarCollapse" aria-expanded="false" aria-label="Toggle navigation">
+					<span class="navbar-toggler-icon"></span>
+				</button>
+				<div class="collapse navbar-collapse" id="navbarCollapse"></div>
+				<ul class="nav navbar-nav navbar-right">
+					<li><a href="{% url 'enrollments_txt' %}">Download CSV</a></li>
+				</ul>
+    		</div>
+		</nav>
+
+		<main class="container">
+			<table id="enrollment_table" class="table small" data-toggle="table" data-pagination="true" data-search="true" data-unique-id="identifier" data-page-list="[10, 25, 50, 100]">
+				<thead>
+					<tr>
+						<th scope="col" data-sortable="true" data-field="identifier">ID</th>
+						<th scope="col" data-sortable="true" data-field="group" data-formatter="selectFormatter" data-search-formatter="false">Group</th>
+						<th scope="col" data-sortable="true">Original ID</th>
+						<th scope="col" data-sortable="true">Rule Set</th>
+						<th scope="col" data-sortable="true">Enrolled</th>
+						<th scope="col" data-sortable="true">History Since</th>
+						<th scope="col" data-sortable="true">Last Updated</th>
+						<th scope="col" data-sortable="true">Latest Data Point</th>
+						<th scope="col" data-sortable="true">Uninstalled</th>
+						<th scope="col" data-sortable="true">Intake Survey</th>
+						<th scope="col" data-sortable="true">Upload</th>
+						<th scope="col" data-sortable="true">Upload</th>
+						<th scope="col" data-sortable="true">Final Survey</th>
+					</tr>
+				</thead>
+				<tbody>
+					{% for enrollment in enrollments %}
+						<tr>
+							<th scope="row">{{ enrollment.assigned_identifier }}</th>
+							<td>{{ enrollment.group }}</td>
+							<td>{{ enrollment.current_raw_identifier }}</td>
+							<td>{{ enrollment.rule_set }}</td>
+							<td>{{ enrollment.enrolled|localtime|date:'Y-m-d H:i' }}</td>
+							<td>{{ enrollment|fetch_metadata:'amazon_start' }}</td>
+							<td>{{ enrollment.last_fetched|localtime|date:'Y-m-d H:i' }}</td>
+							{% if enrollment.latest_data_point %}
+								<td>{{ enrollment.latest_data_point|localtime|date:'Y-m-d H:i' }}</td>
+							{% else %}
+								<td></td>
+							{% endif %}
+							<td>{{ enrollment.last_uninstalled|localtime|date:'Y-m-d H:i' }}</td>
+							<td>{{ enrollment|fetch_completed_task:'qualtrics-initial' }}</td>
+							<td>{{ enrollment|fetch_completed_task:'upload-amazon-start' }}</td>
+							<td>{{ enrollment|fetch_completed_task:'upload-amazon-final' }}</td>
+							<td>{{ enrollment|fetch_completed_task:'qualtrics-final' }}</td>
+						</tr>
+					{% endfor %}
+				</tbody>
+			</table>
+		</main>
+		<script src="{% static 'enrollment/vendor/js/jquery-3.6.0.min.js' %}" crossorigin="anonymous"></script>
+		<script src="{% static 'enrollment/vendor/js/bootstrap.bundle.min.js' %}" crossorigin="anonymous"></script>
+		
+		<script>
+			function selectFormatter(value, row, index, field) {
+				let returnHtml = '' // '<span>' + value + '</span>'
+				
+				returnHtml += '<select class="form-select form-select-sm group_selector" id="group_' + row.identifier + '" style="width: auto;">'
+				returnHtml += '  <option>(None)</option>'
+									
+				{% for group in groups %}
+					returnHtml += '  <option value="{{ group.name }}"'
+					
+					if ('{{ group.name }}' == value) {
+						returnHtml += ' selected' 
+					}
+					
+					returnHtml += '>{{ group.name }}</option>'
+				{% endfor %}
+
+				returnHtml += '</select>'
+				
+				return returnHtml
+			}
+			
+			function attachListeners() {
+				$('.group_selector').off('change')
+				
+				$('.group_selector').change(function(eventObj) {
+					const selector = $(this)
+					
+					const identifier = selector.attr('id').replace('group_', '')
+					const value = selector.children('option:selected').text()
+					
+					selector.attr('disabled', true)
+
+					$.post({
+						'url': '{% url "update_group" %}', 
+						'data': {
+							'identifier': identifier,
+							'group': value
+						},'headers': {
+							'X-CSRFToken': '{{ csrf_token }}'
+						}, 'success': function(data) {
+						  	$("#enrollment_table").bootstrapTable('updateCellByUniqueId', {
+								id: identifier,
+								field: 'group',
+								value: value,
+								reinit: false
+							})
+							
+							selector.removeAttr('disabled')
+						}, 'error': function(jqXHR, textStatus, errorThrown) {
+							alert('Unable to update group for ' + identifier + ': ' + errorThrown)
+						}
+					})
+				})
+			}
+			
+			$(document).ready(function() {
+				window.setTimeout(attachListeners, 500)
+				
+				$('#enrollment_table').on('load-success.bs.table', function (e, data, status, jqXHR) {
+					window.setTimeout(attachListeners, 500)
+				})
+
+				$('#enrollment_table').on('page-change.bs.table', function (e, number, size) {
+					window.setTimeout(attachListeners, 500)
+				})
+
+				$('#enrollment_table').on('sort.bs.table', function (e, number, size) {
+					window.setTimeout(attachListeners, 500)
+				})
+
+				$('#enrollment_table').on('search.bs.table', function (e, number, size) {
+					window.setTimeout(attachListeners, 500)
+				})
+			})
+
+		</script>
+		<script src="{% static 'enrollment/vendor/js/bootstrap-table.js' %}" crossorigin="anonymous"></script>
+	</body>
+</html>

@@ -1,0 +1,64 @@
+version: 2.1
+
+orbs:
+  python: circleci/python@1.2
+
+workflows:
+  build:
+    jobs:
+      - build
+
+jobs:
+  build:
+    docker:
+      - image: cimg/python:3.8
+      - image: cimg/postgres:9.6-postgis
+        auth:
+          username: mydockerhub-user
+          password: $DOCKERHUB_PASSWORD  # context / project UI env-var reference
+        environment:
+          POSTGRES_USER: root
+          POSTGRES_DB: circle_test
+          POSTGRES_PASSWORD: ""
+    steps:
+      - checkout
+      - restore_cache:
+          key: venv-{{ .Branch }}-{{ checksum "requirements.txt" }}-v1
+      - run:
+          name: Build and validate
+          command: |
+            sudo apt-get update && sudo apt-get install -y gdal-bin
+            python -m venv --copies /home/circleci/venv
+            . /home/circleci/venv/bin/activate
+            git submodule init
+            git submodule update
+            pip install --upgrade pip
+            pip install wheel
+            pip install -r requirements.txt --progress-bar off
+            cd ..
+            mv project enrollment
+            mkdir django
+            cd django
+            django-admin.py startproject django_site
+            mv ../enrollment django_site
+            cd django_site
+            cp enrollment/circle_settings.py django_site/settings.py
+            cp enrollment/circle_urls.py django_site/urls.py
+            git clone https://github.com/audacious-software/Quicksilver-Django.git quicksilver
+            git clone https://github.com/audacious-software/Simple-Backup-Django.git simple_backup
+            pip install -r quicksilver/requirements.txt --progress-bar off
+            python manage.py migrate
+            python manage.py test
+            cp enrollment/.pylintrc .
+            pylint enrollment
+            bandit -r .
+      - save_cache:
+          key: venv-{{ .Branch }}-{{ checksum "/home/circleci/django/django_site/enrollment/requirements.txt" }}
+          paths:
+            - "/home/circleci/venv"
+      - store_test_results:
+          path: test-results/
+      - store_artifacts:
+          path: test-reports/
+          destination: python_app
+
